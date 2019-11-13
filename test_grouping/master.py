@@ -1,15 +1,31 @@
 import os
+import threading
+import socket
 from pprint import pprint
 from worker import Worker
+import json
 
 class Master:
-    def __init__(self):
-        w = Worker(0)
-        w2 = Worker(1)
-        wdead = Worker(2)
+    def __init__(self, port_num):
+        w = Worker(0, 6000, 6001)
+        w2 = Worker(1, 6002, 6003)
+        wdead = Worker(2, 6004, 6005)
         wdead.dead = True
         self.workers = [w, w2, wdead]
         self.send_message_for_group()
+
+
+    def send_tcp_message(self, dict):
+        wid = dict["worker_pid"]
+
+        # create an INET, STREAMing socket, this is TCP
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        # connect to the server
+        sock.connect(("localhost", self.workers[wid].rec_port))
+
+        sock.sendall(json.dumps(dict).encode('utf-8'))
+        sock.close()
 
 
     def send_message_for_group(self):
@@ -61,8 +77,9 @@ class Master:
             c += 1
 
         # send all messages to workers
-        pprint(messages_to_send)
+        for wid in messages_to_send:
+            self.send_tcp_message(messages_to_send[wid])
 
 
 if __name__ == "__main__":
-    m = Master()
+    m = Master(8000)
