@@ -4,6 +4,9 @@ import socket
 from pprint import pprint
 from worker import Worker
 import json
+import heapq
+import contextlib
+import copy
 
 class Master:
     def __init__(self, port_num):
@@ -12,7 +15,7 @@ class Master:
         wdead = Worker(2, 6004, 6005)
         wdead.dead = True
         self.workers = [w, w2, wdead]
-        self.send_message_for_group()
+        self.split_merge_into_reduces()
 
 
     def send_tcp_message(self, dict):
@@ -79,6 +82,84 @@ class Master:
         # send all messages to workers
         for wid in messages_to_send:
             self.send_tcp_message(messages_to_send[wid])
+
+
+    def grouping_stage(self):
+        """
+        After all workers group their files into one larger file, the master
+        will merge the files in tmp/job-X/grouper-output/ into one file. Then
+        the master will partition that file into the correct number of files
+        or the reducers.
+        Ray
+        :return:
+        """
+        self.merge_groupings()
+        self.split_merge_into_reduces()
+
+
+    def merge_groupings(self):
+        grouped_path = "tmp/job-0/grouper-output/"
+        grouped_filenames = [os.path.join(grouped_path, f) for f in
+                             os.listdir(grouped_path)]
+        # use heapq's merge
+        output = "tmp/job-0/grouper-output/merge.txt"
+        # Citation: https://stackoverflow.com/questions/26240228/
+        with contextlib.ExitStack() as stack:
+            files = [stack.enter_context(open(fn)) for fn in grouped_filenames]
+            with open(output, 'w') as f:
+                f.writelines(heapq.merge(*files))
+
+
+    def split_merge_into_reduces(self):
+        """Splits merge.txt into num_reducers number of chunks. Each chunk
+        has a distinct key."""
+
+        num_reducers = 5
+        message_template = {
+            "message_type": "new_worker_job",
+            "input_files": ["tmp/job-0/grouper-output/"],
+            "executable": "reducer_executable",
+            "output_directory": "tmp/job-0/reducer-output/",
+            "worker_pid": -1
+        }
+        reducer_msgs = [copy.deepcopy(message_template) for _ in range(num_reducers)]
+        for i in range(len(reducer_msgs)):
+            reducer_msgs[i]["input_files"][0] += "reduce%i.txt" % (i+1)
+            reducer_msgs[i]["output_directory"] += "reduce%i.txt" % (i+1)
+
+        merge_path = "tmp/job-0/grouper-output/merge.txt"
+        count = 0
+        prev = 'a'
+        with open(merge_path) as merge_file:
+            for line in enumerate(merge_file):
+                # line is a pair
+                # index 0 is the line number
+                # index 1 is the text.
+                # line[1][-2] is the value as a str
+                # line[1][0] is the key as a str
+                key = line[1][0]
+                if line[0] == '0':
+                    prev = key
+                if key == prev:
+                    # keep writing to count
+                    with open(reducer_msgs[count]["input_files"][0], "a+") as f:
+                        f.write(line[1])
+                elif key != prev:
+                    # new key
+                    count = (count + 1) % 5
+                    with open(reducer_msgs[count]["input_files"][0], "a+") as f:
+                        f.write(line[1])
+                    prev = key
+
+        worker_ind = 0
+        for i in range(len(reducer_msgs)):
+            if not self.workers[worker_ind].dead:
+                print(i)
+                print(worker_ind)
+                reducer_msgs[i]["worker_pid"] = worker_ind
+                self.send_tcp_message(reducer_msgs[i])
+            worker_ind = (worker_ind + 1) % len(self.workers)
+
 
 
 if __name__ == "__main__":

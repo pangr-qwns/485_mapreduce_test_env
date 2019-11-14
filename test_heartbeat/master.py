@@ -22,11 +22,12 @@ class Master:
         self.threads[0].start()
 
         thread2 = threading.Thread(target=self.count_inter_heartbeat_time)
+        self.threads.append(thread2)
 
         self.time_since_last_heartbeat = {0: 0}
         w = Worker(7999, 7998, 0)
         self.workers = [w]
-        thread2.start()
+        self.threads[1].start()
 
 
     def handle_jobs(self, message):
@@ -64,17 +65,12 @@ class Master:
             socket.AF_INET,  # IPv4
             socket.SOCK_DGRAM,  # UDP
         )
-
         sock.bind(("localhost", port_num))
-
         while True:
             data, addr = sock.recvfrom(4096)
             print(data.decode('utf-8'))
             self.handle_jobs(data.decode('utf-8'))
             time.sleep(0.3)
-
-        # how to send message using udp:
-        # sock.sendto("Hello world".encode('utf-8'), ("localhost", 7999))
 
 
     def count_inter_heartbeat_time(self):
@@ -86,7 +82,6 @@ class Master:
             dictionaries
             - redistribute the now dead worker's tasks.
         Ray
-        :return: None
         """
         while True:
             for worker_id in self.time_since_last_heartbeat:

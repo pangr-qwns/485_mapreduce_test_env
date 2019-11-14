@@ -36,7 +36,5 @@ class Worker:
         while True:
             heartbeat = '{"message_type": "heartbeat", ' \
                         '"worker_pid": %i}' % self.pid
-            print("Sending hearbeat from worker %i" % self.pid)
             sock.sendto(heartbeat.encode('utf-8'), ("localhost", master_port))
-
-            time.sleep(15)
+            time.sleep(2)
